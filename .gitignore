@@ -1,0 +1,17 @@
+# Checked-out upstream source and generated CMake build trees
+/obs-studio/
+/build/
+/build_*/
+/artifacts/
+/dist/
+
+# Build outputs
+*.dll
+*.pdb
+*.zip
+*.log
+
+# IDE and local tooling
+.vs/
+.vscode/
+CMakeUserPresets.json
