@@ -24,7 +24,7 @@
 
 ### DirectShow 時間精度
 
-DirectShow 的 frame interval 使用 100ns 整數時間單位，因此 24/1 會以最接近的整數 interval 表示，底層存在極小的量化誤差。這個選項的目的，是讓 OBS 可以要求裝置提供名義上的 **24.000 FPS 模式**，而不是把 23.976 FPS 當成 24 FPS。
+DirectShow 的 frame interval 使用 100ns 整數時間單位。OBS 的 `MAKE_DSHOW_FPS(24)` 會將 10,000,000 / 24 轉成整數 interval，因此底層存在極小的量化誤差。這個選項的目的，是讓 OBS 可以要求裝置提供名義上的 **24.000 FPS 模式**，而不是把 23.976 FPS 當成 24 FPS。
 
 選項是否可用，仍由裝置在指定解析度與像素格式下回報的 DirectShow capabilities 決定。若驅動程式沒有提供相容模式，OBS 可能會將該選項停用。
 
