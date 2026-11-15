@@ -1,0 +1,162 @@
+name: Build win-dshow True 24
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "patches/**"
+      - "scripts/**"
+      - ".github/workflows/build-windows.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "patches/**"
+      - "scripts/**"
+      - ".github/workflows/build-windows.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: win-dshow-true24-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build OBS 33.0.1 win-dshow (x64)
+    runs-on: windows-2025-vs2026
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      OBS_TAG: "33.0.1"
+      OBS_COMMIT: "65c320b46e1af5c7a555161aea6182cdf7a8c524"
+      BUILD_CONFIG: "RelWithDebInfo"
+
+    steps:
+      - name: Checkout this repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Checkout OBS Studio 33.0.1 and submodules
+        run: |
+          git clone --depth 1 --branch $env:OBS_TAG --recurse-submodules --shallow-submodules https://github.com/obsproject/obs-studio.git obs-studio
+          if ($LASTEXITCODE -ne 0) { throw "OBS source checkout failed." }
+
+          $actualCommit = (git -C obs-studio rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0) { throw "Could not read OBS source commit." }
+          if ($actualCommit -ne $env:OBS_COMMIT) {
+            throw "OBS tag resolved to unexpected commit $actualCommit (expected $env:OBS_COMMIT)."
+          }
+
+      - name: Apply and verify True 24 patch
+        run: |
+          $patch = Join-Path $env:GITHUB_WORKSPACE "patches/obs-33.0.1-true24.patch"
+          git -C obs-studio apply --check $patch
+          if ($LASTEXITCODE -ne 0) { throw "Patch validation failed." }
+
+          git -C obs-studio apply $patch
+          if ($LASTEXITCODE -ne 0) { throw "Patch application failed." }
+
+          $source = "obs-studio/plugins/win-dshow/win-dshow.cpp"
+          if (-not (Select-String -Path $source -Pattern '"24", MAKE_DSHOW_FPS\(24\)' -Quiet)) {
+            throw "The native 24 FPS entry was not found after applying the patch."
+          }
+          if (-not (Select-String -Path $source -Pattern '"24 film", MAKE_DSHOW_FRACTIONAL_FPS\(24000, 1001\)' -Quiet)) {
+            throw "The existing 24 film (24000/1001) entry must remain present."
+          }
+
+      - name: Configure OBS for a focused Windows build
+        working-directory: obs-studio
+        run: |
+          cmake --preset windows-ci-x64 -DENABLE_FRONTEND:BOOL=OFF -DENABLE_BROWSER:BOOL=OFF -DENABLE_SCRIPTING:BOOL=OFF
+          if ($LASTEXITCODE -ne 0) { throw "CMake configuration failed." }
+
+      - name: Build only win-dshow and its required dependencies
+        working-directory: obs-studio
+        run: |
+          cmake --build --preset windows-x64 --config $env:BUILD_CONFIG --target win-dshow --parallel 4
+          if ($LASTEXITCODE -ne 0) { throw "win-dshow build failed." }
+
+      - name: Package and validate x64 DLL
+        run: |
+          $buildRoot = Join-Path $env:GITHUB_WORKSPACE "obs-studio/build_x64"
+          $dlls = @(Get-ChildItem -LiteralPath $buildRoot -Filter "win-dshow.dll" -File -Recurse)
+          if ($dlls.Count -eq 0) {
+            throw "Build completed but win-dshow.dll was not found under $buildRoot."
+          }
+
+          $hashes = @($dlls | ForEach-Object { (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash } | Sort-Object -Unique)
+          if ($hashes.Count -ne 1) {
+            $dlls | ForEach-Object { Write-Host $_.FullName }
+            throw "Multiple win-dshow.dll outputs have different hashes; refusing to package an ambiguous binary."
+          }
+
+          $dll = $dlls | Where-Object { $_.FullName -match '\\rundir\\' } | Select-Object -First 1
+          if ($null -eq $dll) { $dll = $dlls[0] }
+
+          $bytes = [System.IO.File]::ReadAllBytes($dll.FullName)
+          if ($bytes.Length -lt 256) { throw "The generated DLL is unexpectedly small." }
+          $peOffset = [System.BitConverter]::ToInt32($bytes, 0x3c)
+          if ($peOffset -lt 0 -or $peOffset + 6 -gt $bytes.Length) { throw "Invalid PE header offset." }
+          $signature = [System.BitConverter]::ToUInt32($bytes, $peOffset)
+          $machine = [System.BitConverter]::ToUInt16($bytes, $peOffset + 4)
+          if ($signature -ne 0x00004550 -or $machine -ne 0x8664) {
+            throw ("Expected a valid x64 PE DLL (signature=0x{0:X8}, machine=0x{1:X4})." -f $signature, $machine)
+          }
+
+          $stage = Join-Path $env:RUNNER_TEMP "obs-win-dshow-true24"
+          if (Test-Path $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
+          New-Item -ItemType Directory -Path $stage | Out-Null
+
+          Copy-Item -LiteralPath $dll.FullName -Destination (Join-Path $stage "win-dshow.dll")
+          Copy-Item -LiteralPath "scripts/install-true24.ps1" -Destination $stage
+          Copy-Item -LiteralPath "scripts/restore-original.ps1" -Destination $stage
+
+          $sha256 = (Get-FileHash -LiteralPath (Join-Path $stage "win-dshow.dll") -Algorithm SHA256).Hash
+          @"
+OBS win-dshow True 24 - build package
+
+OBS version: $env:OBS_TAG
+OBS source commit: $env:OBS_COMMIT
+Architecture: Windows x64
+Configuration: $env:BUILD_CONFIG
+Built target: win-dshow
+SHA-256: $sha256
+
+Install:
+  1. Close OBS Studio.
+  2. Open PowerShell as Administrator in this extracted folder.
+  3. Run:
+     Set-ExecutionPolicy -Scope Process Bypass
+     .\install-true24.ps1 -ObsRoot "C:\Program Files\obs-studio"
+
+For an OBS installation in another directory, replace the path above.
+The installer creates win-dshow.dll.bak.original beside the original DLL
+and does not overwrite that first backup on subsequent installs.
+
+Restore:
+  .\restore-original.ps1 -ObsRoot "C:\Program Files\obs-studio"
+
+This package changes only the Windows DirectShow capture module.
+The original 24 film (24000/1001) entry is retained.
+"@ | Set-Content -LiteralPath (Join-Path $stage "README.txt") -Encoding utf8
+
+          $zip = Join-Path $env:RUNNER_TEMP "obs-win-dshow-true24-obs-33.0.1-windows-x64.zip"
+          Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $zip -CompressionLevel Optimal -Force
+
+          "### win-dshow True 24 build" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          "- OBS source: `$env:OBS_TAG` (`$env:OBS_COMMIT`)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          "- Output: `win-dshow.dll` (Windows x64)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          "- SHA-256: `$sha256`" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          "- Build output selected from: `$($dll.FullName)`" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Upload DLL package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: obs-win-dshow-true24-obs-33.0.1-windows-x64
+          path: ${{ runner.temp }}/obs-win-dshow-true24-obs-33.0.1-windows-x64.zip
+          if-no-files-found: error
+          retention-days: 1
