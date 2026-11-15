@@ -1,0 +1,9 @@
+diff --git a/plugins/win-dshow/win-dshow.cpp b/plugins/win-dshow/win-dshow.cpp
+--- a/plugins/win-dshow/win-dshow.cpp
++++ b/plugins/win-dshow/win-dshow.cpp
+@@ -1316,4 +1316,5 @@ static const FPSFormat validFPSFormats[] = {
+ 	{"29.97 NTSC", MAKE_DSHOW_FRACTIONAL_FPS(30000, 1001)},
+ 	{"25", MAKE_DSHOW_FPS(25)},
++	{"24", MAKE_DSHOW_FPS(24)},
+ 	{"24 film", MAKE_DSHOW_FRACTIONAL_FPS(24000, 1001)},
+ 	{"20", MAKE_DSHOW_FPS(20)},
