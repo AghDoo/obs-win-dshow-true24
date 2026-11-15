@@ -148,10 +148,10 @@ The original 24 film (24000/1001) entry is retained.
           Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $zip -CompressionLevel Optimal -Force
 
           "### win-dshow True 24 build" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
-          "- OBS source: `$env:OBS_TAG` (`$env:OBS_COMMIT`)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
-          "- Output: `win-dshow.dll` (Windows x64)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
-          "- SHA-256: `$sha256`" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
-          "- Build output selected from: `$($dll.FullName)`" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          ('- OBS source: `{0}` (`{1}`)' -f $env:OBS_TAG, $env:OBS_COMMIT) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          '- Output: `win-dshow.dll` (Windows x64)' | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          ('- SHA-256: `{0}`' -f $sha256) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          ('- Build output selected from: `{0}`' -f $dll.FullName) | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
       - name: Upload DLL package
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
